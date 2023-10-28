@@ -57,11 +57,15 @@ efficiently.
 
 // The code section below describes datatype for input, output matrices and computation between
 // elements in input matrices.
-using ElementAccumulator = int32_t;                 // <- data type of accumulator
+//using ElementAccumulator = int32_t;                 // <- data type of accumulator
+using ElementAccumulator = float;                 // <- data type of accumulator
 using ElementComputeEpilogue = ElementAccumulator;  // <- data type of epilogue operations
-using ElementInputA = cutlass::int4b_t;             // <- data type of elements in input matrix A
-using ElementInputB = cutlass::int4b_t;             // <- data type of elements in input matrix B
-using ElementOutput = int32_t;                      // <- data type of elements in output matrix D
+//using ElementInputA = cutlass::int4b_t;             // <- data type of elements in input matrix A
+//using ElementInputB = cutlass::int4b_t;             // <- data type of elements in input matrix B
+//using ElementOutput = int32_t;                      // <- data type of elements in output matrix D
+using ElementInputA = cutlass::half_t;             // <- data type of elements in input matrix A
+using ElementInputB = cutlass::half_t;             // <- data type of elements in input matrix B
+using ElementOutput = float;                      // <- data type of elements in output matrix D
 
 // The code section below describes matrix layout of input and output matrices. Row Major for
 // Matrix A, Column Major for Matrix B and Row Major for Matrix C
@@ -77,11 +81,14 @@ using SmArch = cutlass::arch::Sm80;
 
 // This code section describes the tile size a thread block will compute
 using ShapeMMAThreadBlock =
-    cutlass::gemm::GemmShape<128, 128, 256>;  // <- threadblock tile M = 128, N = 128, K = 256
+    //cutlass::gemm::GemmShape<128, 128, 256>;  // <- threadblock tile M = 128, N = 128, K = 256
+    cutlass::gemm::GemmShape<128, 128, 64>;  // <- threadblock tile M = 128, N = 128, K = 256
 // This code section describes tile size a warp will compute
-using ShapeMMAWarp = cutlass::gemm::GemmShape<64, 64, 256>;  // <- warp tile M = 64, N = 64, K = 256
+//using ShapeMMAWarp = cutlass::gemm::GemmShape<64, 64, 256>;  // <- warp tile M = 64, N = 64, K = 256
+using ShapeMMAWarp = cutlass::gemm::GemmShape<64, 64, 64>;  // <- warp tile M = 64, N = 64, K = 256
 // This code section describes the size of MMA op
-using ShapeMMAOp = cutlass::gemm::GemmShape<16, 8, 128>;  // <- MMA Op tile M = 16, N = 8, K = 128
+//using ShapeMMAOp = cutlass::gemm::GemmShape<16, 8, 128>;  // <- MMA Op tile M = 16, N = 8, K = 128
+using ShapeMMAOp = cutlass::gemm::GemmShape<16, 8, 32>;  // <- MMA Op tile M = 16, N = 8, K = 128
 
 // This code section describes how threadblocks are scheduled on GPU
 using SwizzleThreadBlock = cutlass::gemm::threadblock::GemmIdentityThreadblockSwizzle<>;  // <- ??
