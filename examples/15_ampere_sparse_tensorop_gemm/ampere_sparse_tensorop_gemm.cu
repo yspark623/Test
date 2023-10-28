@@ -55,7 +55,13 @@ efficiently.
 #include "cutlass/util/tensor_view_io.h"
 #include "helper.h"
 
+#define DENSE_GEMM 1 // 0: disable, 1: enable
 #define REFERENCE 0 // 0: disable, 1: host, 2: cutlass (TBD)
+
+#if DENSE_GEMM==1
+#include "cutlass/gemm/device/gemm.h"
+#endif
+
 // The code section below describes datatype for input, output matrices and computation between
 // elements in input matrices.
 //using ElementAccumulator = int32_t;                 // <- data type of accumulator
@@ -136,11 +142,116 @@ constexpr int kElementsPerElementE = Gemm::kElementsPerElementE;
 // The size of individual meta data 
 constexpr int kMetaSizeInBits = Gemm::kMetaSizeInBits;
 
+  ///////////////////////////////////////////////
+  ///// FOR DENSE GEMM
+  ///////////////////////////////////////////////
+
+#if DENSE_GEMM==1
+using DenseGemm = cutlass::gemm::device::Gemm<ElementInputA,        // Data-type of A matrix
+                                              LayoutInputA,
+                                              ElementInputB,
+                                              LayoutInputB,
+                                              ElementOutput,
+                                              //LayoutOutput>;
+                                              LayoutOutput,
+                                              ElementAccumulator,
+                                              MMAOp,
+                                              SmArch,
+                                              ShapeMMAThreadBlock,
+                                              ShapeMMAWarp
+                                              >;
+#endif
+///////////////////////////////////////////////////////////////////////////////////////////////////
+
+/// Allocates device memory for a matrix then fills with arbitrary small integers.
+cudaError_t AllocateMatrixF(float **matrix, int rows, int columns, int seed = 0) {
+  cudaError_t result;
+
+  size_t sizeof_matrix = sizeof(float) * rows * columns;
+
+  // Allocate device memory.
+  result = cudaMalloc(reinterpret_cast<void **>(matrix), sizeof_matrix);
+
+  if (result != cudaSuccess) {
+    std::cerr << "Failed to allocate matrix: "
+      << cudaGetErrorString(result) << std::endl;
+    return result;
+  }
+
+  // Clear the allocation.
+  result = cudaMemset(*matrix, 0, sizeof_matrix);
+
+  if (result != cudaSuccess) {
+    std::cerr << "Failed to clear matrix device memory: "
+      << cudaGetErrorString(result) << std::endl;
+    return result;
+  }
+
+  // Initialize matrix elements to arbitrary small integers.
+  //result = InitializeMatrix(*matrix, rows, columns, seed);
+
+  if (result != cudaSuccess) {
+    std::cerr << "Failed to initialize matrix: "
+      << cudaGetErrorString(result) << std::endl;
+    return result;
+  }
+
+  return result;
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+
+/// Allocates device memory for a matrix then fills with arbitrary small integers.
+cudaError_t AllocateMatrix(cutlass::half_t **matrix, int rows, int columns, int seed = 0) {
+  cudaError_t result;
+
+  size_t sizeof_matrix = sizeof(cutlass::half_t) * rows * columns;
+
+  // Allocate device memory.
+  result = cudaMalloc(reinterpret_cast<void **>(matrix), sizeof_matrix);
+
+  if (result != cudaSuccess) {
+    std::cerr << "Failed to allocate matrix: "
+      << cudaGetErrorString(result) << std::endl;
+    return result;
+  }
+
+  // Clear the allocation.
+  result = cudaMemset(*matrix, 0, sizeof_matrix);
+
+  if (result != cudaSuccess) {
+    std::cerr << "Failed to clear matrix device memory: "
+      << cudaGetErrorString(result) << std::endl;
+    return result;
+  }
+
+  // Initialize matrix elements to arbitrary small integers.
+  //result = InitializeMatrix(*matrix, rows, columns, seed);
+
+  if (result != cudaSuccess) {
+    std::cerr << "Failed to initialize matrix: "
+      << cudaGetErrorString(result) << std::endl;
+    return result;
+  }
+
+  return result;
+}
+
+//__global__ void vecAdd(cutlass::half_t *a, cutlass::half_t *b, cutlass::half_t *c, int n)
+__global__ void vecAdd(float *a, float *b, float *c, int n)
+{
+  int id = blockIdx.x*blockDim.x+threadIdx.x;
+  if(id<n)
+    c[id] = a[id] + b[id];
+}
+///////////////////////////////////////////////////////////////////////////////////////////////////
+
+
 int run() {
 
-  const int length_m = 512;
-  const int length_n = 512;
-  const int length_k = 1024;
+  const int length_m = 2048;
+  const int length_k = 20480;
+  const int length_n = 5120;
 
   // Create a tuple of problem size for matrix multiplication
   cutlass::gemm::GemmCoord problem_size(length_m, length_n, length_k);
@@ -247,8 +358,67 @@ int run() {
   CUTLASS_CHECK(status);
 
   // Launch initialized CUTLASS kernel
+  printf("start sparse gemm\n");
   status = gemm_op();
+  printf("end sparse gemm\n");
   CUTLASS_CHECK(status);
+  
+  ///////////////////////////////////////////////
+  ///// FOR DENSE GEMM
+  ///////////////////////////////////////////////
+#if DENSE_GEMM==1
+  DenseGemm gemm_operator;
+
+  // Compute leading dimensions for each matrix.
+  int lda = length_m;
+  int ldb = length_k;
+  int ldc = length_m;
+  //float alpha = 1.0;
+  //float beta = 0.0;
+
+  ElementInputA *A;
+  ElementInputB *B;
+  ElementOutput *C;
+
+  cudaError_t result;
+
+  result = AllocateMatrix(&A, length_m, length_k, 0);
+
+  if (result !=  cudaSuccess) {
+    return result;
+  }
+
+  result = AllocateMatrix(&B, length_k, length_n, 17);
+
+  if (result !=  cudaSuccess) {
+    cudaFree(A);
+    return result;
+  }
+
+  result = AllocateMatrixF(&C, length_m, length_n, 101);
+
+  if (result != cudaSuccess) {
+    cudaFree(A);
+    cudaFree(B);
+    return result;
+  }
+
+  DenseGemm::Arguments args({length_m , length_n, length_k},  // Gemm Problem dimensions
+                              {A, lda},    // Tensor-ref for source matrix A
+                              {B, ldb},    // Tensor-ref for source matrix B
+                              {C, ldc},    // Tensor-ref for source matrix C
+                              {C, ldc},    // Tensor-ref for destination matrix D (may be different memory than source C matrix)
+                              {alpha, beta}); // Scalars used in the Epilogue
+
+  printf("start dense gemm\n");
+  status = gemm_operator(args);
+  printf("end dense gemm\n");
+
+  if (status != cutlass::Status::kSuccess) {
+    return cudaErrorUnknown;
+  }
+#endif
+
 
   ///////////////////////////////////////////////
   ///// REFERENCE in HOST
