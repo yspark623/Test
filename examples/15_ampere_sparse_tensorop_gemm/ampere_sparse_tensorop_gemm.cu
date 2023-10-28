@@ -55,6 +55,7 @@ efficiently.
 #include "cutlass/util/tensor_view_io.h"
 #include "helper.h"
 
+#define REFERENCE 0 // 0: disable, 1: host, 2: cutlass (TBD)
 // The code section below describes datatype for input, output matrices and computation between
 // elements in input matrices.
 //using ElementAccumulator = int32_t;                 // <- data type of accumulator
@@ -249,6 +250,11 @@ int run() {
   status = gemm_op();
   CUTLASS_CHECK(status);
 
+  ///////////////////////////////////////////////
+  ///// REFERENCE in HOST
+  ///////////////////////////////////////////////
+#if REFERENCE==1
+
   // uncompress tensor_a based on meta data tensor_e. We need it for reference computing.
   cutlass::uncompress(tensor_a_uncompressed.host_ref(), tensor_a.host_ref(),
                       tensor_e.host_ref(), problem_size.m(), problem_size.k());
@@ -285,6 +291,13 @@ int run() {
   std::cout << (passed ? "Passed" : "Failed") << std::endl;
 
   return (passed ? 0  : -1);
+#elif REFERENCE==2
+  std::cout<<"reference on culbas(NYI)"<<std::endl;
+  return 0;
+#else
+  std::cout<<"no reference"<<std::endl;
+  return 0;
+#endif
 }
 
 int main() {
