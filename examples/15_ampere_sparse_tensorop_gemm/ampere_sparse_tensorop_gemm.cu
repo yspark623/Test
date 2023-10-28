@@ -253,6 +253,7 @@ int run() {
   const int length_k = 20480;
   const int length_n = 5120;
 
+  std::cout<< "M: "<<length_m<<", K: "<<length_k<<", N: "<<length_n<<std::endl;
   // Create a tuple of problem size for matrix multiplication
   cutlass::gemm::GemmCoord problem_size(length_m, length_n, length_k);
 
