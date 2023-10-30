@@ -55,10 +55,16 @@ efficiently.
 #include "cutlass/util/tensor_view_io.h"
 #include "helper.h"
 
-#define DENSE_GEMM 1 // 0: disable, 1: enable
-#define REFERENCE 0 // 0: disable, 1: host, 2: cutlass (TBD)
 
-#if DENSE_GEMM==1
+///////////////////////////////////////////////
+///// TEST CONFIGURATION
+///////////////////////////////////////////////
+#define DENSE_GEMM_EN 0 // 0: disable, 1: enable
+#define VEC_ADD_EN    1 // 0: disable, 1: enable
+#define REFERENCE     0 // 0: disable, 1: host, 2: cutlass (TBD)
+
+
+#if DENSE_GEMM_EN==1
 #include "cutlass/gemm/device/gemm.h"
 #endif
 
@@ -146,7 +152,7 @@ constexpr int kMetaSizeInBits = Gemm::kMetaSizeInBits;
   ///// FOR DENSE GEMM
   ///////////////////////////////////////////////
 
-#if DENSE_GEMM==1
+#if DENSE_GEMM_EN==1
 using DenseGemm = cutlass::gemm::device::Gemm<ElementInputA,        // Data-type of A matrix
                                               LayoutInputA,
                                               ElementInputB,
@@ -249,11 +255,12 @@ __global__ void vecAdd(float *a, float *b, float *c, int n)
 
 int run() {
 
-  const int length_m = 2048;
+  const int length_m_extra = 1024;
+  const int length_m = 2048 + length_m_extra;
   const int length_k = 20480;
   const int length_n = 5120;
 
-  std::cout<< "M: "<<length_m<<", K: "<<length_k<<", N: "<<length_n<<std::endl;
+  std::cout<< "M: "<<length_m<<" (+"<<length_m_extra<<"), K: "<<length_k<<", N: "<<length_n<<std::endl;
   // Create a tuple of problem size for matrix multiplication
   cutlass::gemm::GemmCoord problem_size(length_m, length_n, length_k);
 
@@ -363,11 +370,19 @@ int run() {
   status = gemm_op();
   printf("end sparse gemm\n");
   CUTLASS_CHECK(status);
+
+  ///////////////////////////////////////////////
+  ///// VECTOR ADDITION
+  ///////////////////////////////////////////////
+  for(int i=0; i<length_m_extra; i++)
+    //std::cout<<i*length_n<<", "<<(length_m-i-1)*length_n
+    vecAdd<<<5,1024>>>(tensor_d.device_data_ptr_offset(i*length_n), tensor_d.device_data_ptr_offset((length_m-i-1)*length_n), tensor_d.device_data_ptr_offset(i*length_n), length_n);
+    //vecAdd<<<5,1024>>>(tensor_d.device_data_ptr_offset(i*length_n/2), tensor_d.device_data_ptr_offset(length_m-i+1*length_n/2), tensor_d.device_data_ptr_offset(i*length_n/2), length_n/2);
   
   ///////////////////////////////////////////////
   ///// FOR DENSE GEMM
   ///////////////////////////////////////////////
-#if DENSE_GEMM==1
+#if DENSE_GEMM_EN==1
   DenseGemm gemm_operator;
 
   // Compute leading dimensions for each matrix.
@@ -466,6 +481,7 @@ int run() {
   std::cout<<"reference on culbas(NYI)"<<std::endl;
   return 0;
 #else
+  tensor_d.host_view(),
   std::cout<<"no reference"<<std::endl;
   return 0;
 #endif
