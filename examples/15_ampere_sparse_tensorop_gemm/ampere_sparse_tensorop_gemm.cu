@@ -255,7 +255,7 @@ __global__ void vecAdd(float *a, float *b, float *c, int n)
 
 int run() {
 
-  const int length_m_extra = 1024;
+  const int length_m_extra = 128;
   const int length_m = 2048 + length_m_extra;
   const int length_k = 20480;
   const int length_n = 5120;
