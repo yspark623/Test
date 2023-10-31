@@ -59,10 +59,11 @@ efficiently.
 ///////////////////////////////////////////////
 ///// TEST CONFIGURATION
 ///////////////////////////////////////////////
-#define DENSE_GEMM_EN 0 // 0: disable, 1: enable
-#define VEC_ADD_EN    1 // 0: disable, 1: enable
-#define REF_EN        2 // 0: disable, 1: host, 2: cutlass
-#define DBG_LOG_EN    0 // 0: disable, 1: host, 2: cutlass
+#define DENSE_GEMM_EN   0 // 0: disable, 1: enable
+#define VEC_ADD_EN      1 // 0: disable, 1: enable
+#define REF_EN          2 // 0: disable, 1: host, 2: cutlass
+#define DBG_LOG_EN      0 // 0: disable, 1: enable
+#define LIST_ENTRY_NUM  1024
 
 
 #if (DENSE_GEMM_EN==1 || REF_EN==2)
@@ -170,10 +171,11 @@ using DenseGemm = cutlass::gemm::device::Gemm<ElementInputA,        // Data-type
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
 /// Allocates device memory for a matrix then fills with arbitrary small integers.
-cudaError_t AllocateMatrixF(float **matrix, int rows, int columns, int seed = 0) {
+template <typename T>
+cudaError_t AllocateMatrix(T **matrix, int rows, int columns, int seed = 0) {
   cudaError_t result;
 
-  size_t sizeof_matrix = sizeof(float) * rows * columns;
+  size_t sizeof_matrix = sizeof(T) * rows * columns;
 
   // Allocate device memory.
   result = cudaMalloc(reinterpret_cast<void **>(matrix), sizeof_matrix);
@@ -206,42 +208,6 @@ cudaError_t AllocateMatrixF(float **matrix, int rows, int columns, int seed = 0)
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
-
-/// Allocates device memory for a matrix then fills with arbitrary small integers.
-cudaError_t AllocateMatrix(cutlass::half_t **matrix, int rows, int columns, int seed = 0) {
-  cudaError_t result;
-
-  size_t sizeof_matrix = sizeof(cutlass::half_t) * rows * columns;
-
-  // Allocate device memory.
-  result = cudaMalloc(reinterpret_cast<void **>(matrix), sizeof_matrix);
-
-  if (result != cudaSuccess) {
-    std::cerr << "Failed to allocate matrix: "
-      << cudaGetErrorString(result) << std::endl;
-    return result;
-  }
-
-  // Clear the allocation.
-  result = cudaMemset(*matrix, 0, sizeof_matrix);
-
-  if (result != cudaSuccess) {
-    std::cerr << "Failed to clear matrix device memory: "
-      << cudaGetErrorString(result) << std::endl;
-    return result;
-  }
-
-  // Initialize matrix elements to arbitrary small integers.
-  //result = InitializeMatrix(*matrix, rows, columns, seed);
-
-  if (result != cudaSuccess) {
-    std::cerr << "Failed to initialize matrix: "
-      << cudaGetErrorString(result) << std::endl;
-    return result;
-  }
-
-  return result;
-}
 
 //__global__ void vecAdd(cutlass::half_t *a, cutlass::half_t *b, cutlass::half_t *c, int n)
 __global__ void vecAdd(float *a, float *b, float *c, int n)
@@ -251,24 +217,27 @@ __global__ void vecAdd(float *a, float *b, float *c, int n)
     c[id] = a[id] + b[id];
 }
 
-__global__ void vecAddOpt(float *a, float *b, float *c, int m, int extra_rows, int col_num, int blocksPerRow)
+__global__ void vecAddOpt(float *a, float *b, float *c, int m, int extra_rows, int col_num, int blocksPerRow, int* d_invalid_list)
 {
-  int row_id = blockIdx.x/blocksPerRow;
-  //int col_id = row_id*blockDim.x+threadIdx.x;
-  int col_id = blockIdx.x%blocksPerRow + threadIdx.x;
+  int extra_row_id = blockIdx.x/blocksPerRow;
+  //int col_id = extra_row_id*blockDim.x+threadIdx.x;
+  int col_id = (blockIdx.x%blocksPerRow)*blockDim.x + threadIdx.x;
   //int id = blockIdx.x*blockDim.x+threadIdx.x;
-  if(row_id<extra_rows && col_id<col_num)
-    c[row_id*col_num+col_id] = a[row_id*col_num+col_id] + b[(m+row_id)*col_num+col_id];
+  if(extra_row_id<extra_rows && col_id<col_num){
+    c[d_invalid_list[extra_row_id]*col_num+col_id] = a[d_invalid_list[extra_row_id]*col_num+col_id] + b[(m+extra_row_id)*col_num+col_id];
+    //if(col_id==0)
+    //  printf("extra_row_id: %d, original_row: %d\n", extra_row_id, d_invalid_list[extra_row_id]);
     //c[id] = a[id] + b[id];
+  }
 }
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
 
 int run() {
 
-  const int length_m_extra = 224;
+  const int length_m_extra = 128;
   const int length_m = 2048 + length_m_extra;
-  const int length_k = 20480;
+  const int length_k = 2048;
   const int length_n = 5120;
 
   std::cout<< "M: "<<length_m<<" (+"<<length_m_extra<<"), K: "<<length_k<<", N: "<<length_n<<std::endl;
@@ -401,6 +370,35 @@ int run() {
 #if VEC_ADD_EN==1
   std::cout<<"Start vector addition"<<std::endl;
 
+  // Allocate host memory for invalid_list
+  size_t sizeof_invalid_list = sizeof(int) * LIST_ENTRY_NUM;
+  int *h_invalid_list = (int*)malloc(sizeof_invalid_list);
+
+  // Initialize invalid list
+  for(int i=0; i<length_m_extra; i++){
+    h_invalid_list[i] = 2*i;
+  }
+
+  //for(int i=0; i<length_m_extra; i++){
+  //  std::cout<<h_invalid_list[i]<<std::endl;
+  //}
+
+  // Allocate device memory
+  cudaError_t result;
+  int *d_invalid_list;
+  result = cudaMalloc((void**)&d_invalid_list, sizeof_invalid_list);
+  if (result != cudaSuccess) {
+    std::cerr << "Failed to allocate matrix: "
+      << cudaGetErrorString(result) << std::endl;
+    return result;
+  }
+  result = cudaMemcpy(d_invalid_list, h_invalid_list, sizeof_invalid_list, cudaMemcpyHostToDevice);
+  if (result != cudaSuccess) {
+    std::cerr << "Failed to cudaMemCpy "
+      << cudaGetErrorString(result) << std::endl;
+    return result;
+  }
+
   int numElements = length_m_extra * length_n;
 
   int threadsPerBlock = 1024;
@@ -413,7 +411,7 @@ int run() {
 
   //vecAddOpt<<<blocksPerGrid,threadsPerBlock>>>(tensor_d.device_data_ptr_offset(i*length_n), tensor_d.device_data_ptr_offset((length_m-i-1)*length_n), tensor_d.device_data_ptr_offset(i*length_n), length_n);
 
-  vecAddOpt<<<blocksPerGrid,threadsPerBlock>>>(tensor_d.device_data_ptr_offset(0), tensor_d.device_data_ptr_offset(0), tensor_d.device_data_ptr_offset(0), length_m-length_m_extra, length_m_extra, length_n, blocksPerRow);
+  vecAddOpt<<<blocksPerGrid,threadsPerBlock>>>(tensor_d.device_data_ptr_offset(0), tensor_d.device_data_ptr_offset(0), tensor_d.device_data_ptr_offset(0), length_m-length_m_extra, length_m_extra, length_n, blocksPerRow, d_invalid_list);
 
 ////  for(int i=0; i<length_m_extra; i++)
 ////    //std::cout<<i*length_n<<", "<<(length_m-i-1)*length_n
@@ -427,6 +425,8 @@ int run() {
   std::cout<<"tensor_d after vec add"<<std::endl;
   std::cout<<tensor_d.host_view()<<std::endl;
 #endif
+  free(h_invalid_list);
+  cudaFree(d_invalid_list);
 #endif
   
   ///////////////////////////////////////////////
@@ -461,7 +461,7 @@ int run() {
     return result;
   }
 
-  result = AllocateMatrixF(&C, length_m, length_n, 101);
+  result = AllocateMatrix(&C, length_m, length_n, 101);
 
   if (result != cudaSuccess) {
     cudaFree(A);
