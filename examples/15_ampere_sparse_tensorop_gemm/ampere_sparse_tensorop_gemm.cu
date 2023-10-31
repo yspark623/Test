@@ -62,6 +62,7 @@ efficiently.
 #define DENSE_GEMM_EN 0 // 0: disable, 1: enable
 #define VEC_ADD_EN    1 // 0: disable, 1: enable
 #define REF_EN        2 // 0: disable, 1: host, 2: cutlass
+#define DBG_LOG_EN    0 // 0: disable, 1: host, 2: cutlass
 
 
 #if (DENSE_GEMM_EN==1 || REF_EN==2)
@@ -250,13 +251,14 @@ __global__ void vecAdd(float *a, float *b, float *c, int n)
     c[id] = a[id] + b[id];
 }
 
-__global__ void vecAddOpt(float *a, float *b, float *c, int extra_rows, int col_num)
+__global__ void vecAddOpt(float *a, float *b, float *c, int m, int extra_rows, int col_num, int blocksPerRow)
 {
-  int row_id = blockIdx.x%5;
-  int col_id = row_id*blockDim.x+threadIdx.x;
+  int row_id = blockIdx.x/blocksPerRow;
+  //int col_id = row_id*blockDim.x+threadIdx.x;
+  int col_id = blockIdx.x%blocksPerRow + threadIdx.x;
   //int id = blockIdx.x*blockDim.x+threadIdx.x;
   if(row_id<extra_rows && col_id<col_num)
-    c[row_id*col_num+col_id] = a[row_id*col_num+col_id] + b[row_id*col_num+col_id];
+    c[row_id*col_num+col_id] = a[row_id*col_num+col_id] + b[(m+row_id)*col_num+col_id];
     //c[id] = a[id] + b[id];
 }
 ///////////////////////////////////////////////////////////////////////////////////////////////////
@@ -264,7 +266,7 @@ __global__ void vecAddOpt(float *a, float *b, float *c, int extra_rows, int col_
 
 int run() {
 
-  const int length_m_extra = 0;
+  const int length_m_extra = 224;
   const int length_m = 2048 + length_m_extra;
   const int length_k = 20480;
   const int length_n = 5120;
@@ -302,13 +304,15 @@ int run() {
       tensor_a.host_view(),
       1,
       ElementInputA(2),
-      ElementInputA(-2),
+      //ElementInputA(-2),
+      ElementInputA(1),
       0);  // <- Fill matrix A on host with uniform-distribution random data
   cutlass::reference::host::TensorFillRandomUniform(
       tensor_b.host_view(),
       1,
       ElementInputB(2),
-      ElementInputB(-2),
+      //ElementInputB(-2),
+      ElementInputB(1),
       0);  // <- Fill matrix B on host with uniform-distribution random data
   cutlass::reference::host::TensorFillRandomUniform(
       tensor_c.host_view(),
@@ -380,6 +384,16 @@ int run() {
   std::cout<<"End sparse gemm"<<std::endl;
   CUTLASS_CHECK(status);
 
+  tensor_d.sync_host();
+#if DBG_LOG_EN==1
+  std::cout<<"tensor_a"<<std::endl;
+  std::cout<<tensor_a.host_view()<<std::endl;
+  std::cout<<"tensor_b"<<std::endl;
+  std::cout<<tensor_b.host_view()<<std::endl;
+  std::cout<<"tensor_d"<<std::endl;
+  std::cout<<tensor_d.host_view()<<std::endl;
+#endif
+
   ///////////////////////////////////////////////
   ///// VECTOR ADDITION
   ///////////////////////////////////////////////
@@ -390,13 +404,16 @@ int run() {
   int numElements = length_m_extra * length_n;
 
   int threadsPerBlock = 1024;
-  int blocksPerGrid = (numElements + threadsPerBlock -1) / threadsPerBlock;
+  //int threadsPerBlock = 32;
+  int blocksPerGrid = (numElements + threadsPerBlock - 1) / threadsPerBlock;
 
-  std::cout<<"# of extra rows: "<< length_m_extra <<", # of blocks: "<< blocksPerGrid <<", # of threads per block: "<< threadsPerBlock <<std::endl;
+  int blocksPerRow = (length_n + threadsPerBlock - 1) / threadsPerBlock;
+
+  std::cout<<"# of extra rows: "<< length_m_extra <<", # of blocks: "<< blocksPerGrid <<", # of blocks per row: "<< blocksPerRow <<", # of threads per block: "<< threadsPerBlock <<std::endl;
 
   //vecAddOpt<<<blocksPerGrid,threadsPerBlock>>>(tensor_d.device_data_ptr_offset(i*length_n), tensor_d.device_data_ptr_offset((length_m-i-1)*length_n), tensor_d.device_data_ptr_offset(i*length_n), length_n);
 
-  vecAddOpt<<<blocksPerGrid,threadsPerBlock>>>(tensor_d.device_data_ptr_offset(0), tensor_d.device_data_ptr_offset(0), tensor_d.device_data_ptr_offset(0),length_m_extra, length_n);
+  vecAddOpt<<<blocksPerGrid,threadsPerBlock>>>(tensor_d.device_data_ptr_offset(0), tensor_d.device_data_ptr_offset(0), tensor_d.device_data_ptr_offset(0), length_m-length_m_extra, length_m_extra, length_n, blocksPerRow);
 
 ////  for(int i=0; i<length_m_extra; i++)
 ////    //std::cout<<i*length_n<<", "<<(length_m-i-1)*length_n
@@ -405,6 +422,11 @@ int run() {
 ////    //vecAdd<<<5,1024>>>(tensor_d.device_data_ptr_offset(i*length_n/2), tensor_d.device_data_ptr_offset(length_m-i+1*length_n/2), tensor_d.device_data_ptr_offset(i*length_n/2), length_n/2);
 
   std::cout<<"End vector addition"<<std::endl;
+  tensor_d.sync_host();
+#if DBG_LOG_EN==1
+  std::cout<<"tensor_d after vec add"<<std::endl;
+  std::cout<<tensor_d.host_view()<<std::endl;
+#endif
 #endif
   
   ///////////////////////////////////////////////
@@ -527,7 +549,7 @@ int run() {
                                 tensor_c.device_ref(),  // <- reference to matrix C on device
                                 tensor_ref_d.device_ref(),  // <- reference to matrix D on device
                                 {alpha, beta},          // <- tuple of alpha and beta
-                                split_k_slices};        // <- k-dimension split factor
+                                1};        // <- k-dimension split factor
 
   status = gemm_ref(args_ref);
 
