@@ -60,11 +60,11 @@ efficiently.
 ///// TEST CONFIGURATION
 ///////////////////////////////////////////////
 #define DENSE_GEMM_EN 0 // 0: disable, 1: enable
-#define VEC_ADD_EN    0 // 0: disable, 1: enable
-#define REFERENCE     0 // 0: disable, 1: host, 2: cutlass (TBD)
+#define VEC_ADD_EN    1 // 0: disable, 1: enable
+#define REF_EN        2 // 0: disable, 1: host, 2: cutlass
 
 
-#if DENSE_GEMM_EN==1
+#if (DENSE_GEMM_EN==1 || REF_EN==2)
 #include "cutlass/gemm/device/gemm.h"
 #endif
 
@@ -152,13 +152,12 @@ constexpr int kMetaSizeInBits = Gemm::kMetaSizeInBits;
   ///// FOR DENSE GEMM
   ///////////////////////////////////////////////
 
-#if DENSE_GEMM_EN==1
+#if (DENSE_GEMM_EN==1 || REF_EN==2)
 using DenseGemm = cutlass::gemm::device::Gemm<ElementInputA,        // Data-type of A matrix
                                               LayoutInputA,
                                               ElementInputB,
                                               LayoutInputB,
                                               ElementOutput,
-                                              //LayoutOutput>;
                                               LayoutOutput,
                                               ElementAccumulator,
                                               MMAOp,
@@ -265,7 +264,7 @@ __global__ void vecAddOpt(float *a, float *b, float *c, int extra_rows, int col_
 
 int run() {
 
-  const int length_m_extra = 224;
+  const int length_m_extra = 0;
   const int length_m = 2048 + length_m_extra;
   const int length_k = 20480;
   const int length_n = 5120;
@@ -468,8 +467,9 @@ int run() {
   ///////////////////////////////////////////////
   ///// REFERENCE in HOST
   ///////////////////////////////////////////////
-#if REFERENCE==1
+#if REF_EN==1
 
+  std::cout<<"Start reference on host"<<std::endl;
   // uncompress tensor_a based on meta data tensor_e. We need it for reference computing.
   cutlass::uncompress(tensor_a_uncompressed.host_ref(), tensor_a.host_ref(),
                       tensor_e.host_ref(), problem_size.m(), problem_size.k());
@@ -504,10 +504,49 @@ int run() {
     tensor_ref_d.host_view());
 
   std::cout << (passed ? "Passed" : "Failed") << std::endl;
+  std::cout<<"End reference on host"<<std::endl;
 
   return (passed ? 0  : -1);
-#elif REFERENCE==2
-  std::cout<<"Reference on culbas(NYI)"<<std::endl;
+#elif REF_EN==2
+  std::cout<<"Start reference on cutlass"<<std::endl;
+
+  DenseGemm gemm_ref;
+
+  // uncompress tensor_a based on meta data tensor_e. We need it for reference computing.
+  cutlass::uncompress(tensor_a_uncompressed.host_ref(), tensor_a.host_ref(),
+                      tensor_e.host_ref(), problem_size.m(), problem_size.k());
+
+  // Copy data from host to GPU
+  tensor_a_uncompressed.sync_device();
+
+  // Create a tuple of gemm kernel arguments. This is later passed as arguments to launch
+  // instantiated CUTLASS kernel
+  DenseGemm::Arguments args_ref{problem_size,  // <- problem size of matrix multiplication
+                                tensor_a_uncompressed.device_ref(),  // <- reference to matrix A on device
+                                tensor_b.device_ref(),  // <- reference to matrix B on device
+                                tensor_c.device_ref(),  // <- reference to matrix C on device
+                                tensor_ref_d.device_ref(),  // <- reference to matrix D on device
+                                {alpha, beta},          // <- tuple of alpha and beta
+                                split_k_slices};        // <- k-dimension split factor
+
+  status = gemm_ref(args_ref);
+
+  if (status != cutlass::Status::kSuccess) {
+    return cudaErrorUnknown;
+  }
+
+  // Copy output data from CUTLASS host for comparison
+  tensor_d.sync_host();
+  tensor_ref_d.sync_host();
+
+  // Check if output from CUTLASS kernel and reference kernel are equal or not
+  bool passed = cutlass::reference::host::TensorEquals(
+    tensor_d.host_view(),
+    tensor_ref_d.host_view());
+
+  std::cout << (passed ? "Passed" : "Failed") << std::endl;
+  std::cout<<"End reference on cutlass"<<std::endl;
+
   return 0;
 #else
   tensor_d.host_view(),
