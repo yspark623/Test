@@ -60,7 +60,7 @@ efficiently.
 ///// TEST CONFIGURATION
 ///////////////////////////////////////////////
 #define DENSE_GEMM_EN 0 // 0: disable, 1: enable
-#define VEC_ADD_EN    1 // 0: disable, 1: enable
+#define VEC_ADD_EN    0 // 0: disable, 1: enable
 #define REFERENCE     0 // 0: disable, 1: host, 2: cutlass (TBD)
 
 
@@ -385,6 +385,7 @@ int run() {
   ///// VECTOR ADDITION
   ///////////////////////////////////////////////
 
+#if VEC_ADD_EN==1
   std::cout<<"Start vector addition"<<std::endl;
 
   int numElements = length_m_extra * length_n;
@@ -405,6 +406,7 @@ int run() {
 ////    //vecAdd<<<5,1024>>>(tensor_d.device_data_ptr_offset(i*length_n/2), tensor_d.device_data_ptr_offset(length_m-i+1*length_n/2), tensor_d.device_data_ptr_offset(i*length_n/2), length_n/2);
 
   std::cout<<"End vector addition"<<std::endl;
+#endif
   
   ///////////////////////////////////////////////
   ///// FOR DENSE GEMM
