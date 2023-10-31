@@ -250,12 +250,22 @@ __global__ void vecAdd(float *a, float *b, float *c, int n)
   if(id<n)
     c[id] = a[id] + b[id];
 }
+
+__global__ void vecAddOpt(float *a, float *b, float *c, int extra_rows, int col_num)
+{
+  int row_id = blockIdx.x%5;
+  int col_id = row_id*blockDim.x+threadIdx.x;
+  //int id = blockIdx.x*blockDim.x+threadIdx.x;
+  if(row_id<extra_rows && col_id<col_num)
+    c[row_id*col_num+col_id] = a[row_id*col_num+col_id] + b[row_id*col_num+col_id];
+    //c[id] = a[id] + b[id];
+}
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
 
 int run() {
 
-  const int length_m_extra = 128;
+  const int length_m_extra = 224;
   const int length_m = 2048 + length_m_extra;
   const int length_k = 20480;
   const int length_n = 5120;
@@ -366,18 +376,35 @@ int run() {
   CUTLASS_CHECK(status);
 
   // Launch initialized CUTLASS kernel
-  printf("start sparse gemm\n");
+  std::cout<<"Start sparse gemm"<<std::endl;
   status = gemm_op();
-  printf("end sparse gemm\n");
+  std::cout<<"End sparse gemm"<<std::endl;
   CUTLASS_CHECK(status);
 
   ///////////////////////////////////////////////
   ///// VECTOR ADDITION
   ///////////////////////////////////////////////
-  for(int i=0; i<length_m_extra; i++)
-    //std::cout<<i*length_n<<", "<<(length_m-i-1)*length_n
-    vecAdd<<<5,1024>>>(tensor_d.device_data_ptr_offset(i*length_n), tensor_d.device_data_ptr_offset((length_m-i-1)*length_n), tensor_d.device_data_ptr_offset(i*length_n), length_n);
-    //vecAdd<<<5,1024>>>(tensor_d.device_data_ptr_offset(i*length_n/2), tensor_d.device_data_ptr_offset(length_m-i+1*length_n/2), tensor_d.device_data_ptr_offset(i*length_n/2), length_n/2);
+
+  std::cout<<"Start vector addition"<<std::endl;
+
+  int numElements = length_m_extra * length_n;
+
+  int threadsPerBlock = 1024;
+  int blocksPerGrid = (numElements + threadsPerBlock -1) / threadsPerBlock;
+
+  std::cout<<"# of extra rows: "<< length_m_extra <<", # of blocks: "<< blocksPerGrid <<", # of threads per block: "<< threadsPerBlock <<std::endl;
+
+  //vecAddOpt<<<blocksPerGrid,threadsPerBlock>>>(tensor_d.device_data_ptr_offset(i*length_n), tensor_d.device_data_ptr_offset((length_m-i-1)*length_n), tensor_d.device_data_ptr_offset(i*length_n), length_n);
+
+  vecAddOpt<<<blocksPerGrid,threadsPerBlock>>>(tensor_d.device_data_ptr_offset(0), tensor_d.device_data_ptr_offset(0), tensor_d.device_data_ptr_offset(0),length_m_extra, length_n);
+
+////  for(int i=0; i<length_m_extra; i++)
+////    //std::cout<<i*length_n<<", "<<(length_m-i-1)*length_n
+////    //vecAdd<<<blocksPerGrid,threadsPerBlock>>>(tensor_d.device_data_ptr_offset(i*length_n), tensor_d.device_data_ptr_offset((length_m-i-1)*length_n), tensor_d.device_data_ptr_offset(i*length_n), length_n);
+////    vecAdd<<<5,1024>>>(tensor_d.device_data_ptr_offset(i*length_n), tensor_d.device_data_ptr_offset((length_m-i-1)*length_n), tensor_d.device_data_ptr_offset(i*length_n), length_n);
+////    //vecAdd<<<5,1024>>>(tensor_d.device_data_ptr_offset(i*length_n/2), tensor_d.device_data_ptr_offset(length_m-i+1*length_n/2), tensor_d.device_data_ptr_offset(i*length_n/2), length_n/2);
+
+  std::cout<<"End vector addition"<<std::endl;
   
   ///////////////////////////////////////////////
   ///// FOR DENSE GEMM
@@ -426,9 +453,9 @@ int run() {
                               {C, ldc},    // Tensor-ref for destination matrix D (may be different memory than source C matrix)
                               {alpha, beta}); // Scalars used in the Epilogue
 
-  printf("start dense gemm\n");
+  std::cout<<"Start dense gemm"<<std::endl;
   status = gemm_operator(args);
-  printf("end dense gemm\n");
+  std::cout<<"End dense gemm"<<std::endl;
 
   if (status != cutlass::Status::kSuccess) {
     return cudaErrorUnknown;
@@ -478,11 +505,11 @@ int run() {
 
   return (passed ? 0  : -1);
 #elif REFERENCE==2
-  std::cout<<"reference on culbas(NYI)"<<std::endl;
+  std::cout<<"Reference on culbas(NYI)"<<std::endl;
   return 0;
 #else
   tensor_d.host_view(),
-  std::cout<<"no reference"<<std::endl;
+  std::cout<<"No reference"<<std::endl;
   return 0;
 #endif
 }
