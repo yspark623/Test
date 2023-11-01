@@ -1494,6 +1494,7 @@ struct TensorFillInputSparseMetaFunc {
 
   TensorView view;
   InputSparseMetaFunc<Element> func;
+  int extra_row_num;
 
   //
   // Methods
@@ -1502,16 +1503,21 @@ struct TensorFillInputSparseMetaFunc {
   /// Construction of Gaussian RNG functor.
   TensorFillInputSparseMetaFunc(
     TensorView view_ = TensorView(),
-    InputSparseMetaFunc<Element> func_ = InputSparseMetaFunc<Element>()
+    InputSparseMetaFunc<Element> func_ = InputSparseMetaFunc<Element>(),
+    int extra_row_num_ = 0
   ):
-    view(view_), func(func_) {
+    view(view_), func(func_), extra_row_num(extra_row_num_) {
 
   }
 
   /// Compute random value and update RNG state
   void operator()(Coord<Layout::kRank> const &coord) const {
 
-    view.at(coord) = func();
+    if(coord[0]<extra_row_num){
+      std::cout<<coord<<std::endl;
+      view.at(coord) = func();
+    }
+
   }
 };
 
@@ -1551,13 +1557,15 @@ void TensorFillInputSparseMeta(
   TensorView<Element, Layout> dst,  ///< destination tensor
   uint64_t seed,                    ///< seed for RNG
   int input,
+  int extra_row_num,
   int MetaSizeInBits) {             ///< 2 bit or 4 bit
 
   detail::InputSparseMetaFunc<Element> random_func(seed, input, MetaSizeInBits);
 
   detail::TensorFillInputSparseMetaFunc<Element, Layout> func(
     dst,
-    random_func
+    random_func,
+    extra_row_num 
   );
 
   TensorForEach(
