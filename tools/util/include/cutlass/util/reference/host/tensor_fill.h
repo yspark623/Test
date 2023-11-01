@@ -1431,6 +1431,90 @@ struct TensorFillRandomSparseMetaFunc {
   }
 };
 
+template <typename Element>
+struct InputSparseMetaFunc {
+  
+  uint64_t seed;
+  int input;
+  int range;
+  int MetaSizeInBits;
+
+  //
+  // Methods
+  //
+
+  InputSparseMetaFunc(
+    uint64_t seed_ = 0, 
+    int input_ = 0x4444,
+    int MetaSizeInBits_ = 2
+  ):
+    seed(seed_), input(input_), MetaSizeInBits(MetaSizeInBits_) {
+      std::srand((unsigned)seed);
+      if (MetaSizeInBits_ == 2) {
+        range = 6;
+      } else if (MetaSizeInBits_ == 4) {
+        range = 2;
+      }
+    }
+
+  /// Compute random value and update RNG state
+  Element operator()() const {
+    Element FourToTwoMeta[6] = {0x4, 0x8, 0x9, 0xc, 0xd, 0xe};
+    Element TwoToOneMeta[2] = {0x4, 0xe};
+
+    Element * MetaArray = (MetaSizeInBits == 2) ? FourToTwoMeta : TwoToOneMeta;
+
+    Element result = 0x0;
+
+    for (int i = 0; i < cutlass::sizeof_bits<Element>::value / 4; ++i) {
+      int rnd = std::rand() % range;
+      Element meta = MetaArray[rnd];
+
+      result = (Element)(result | ((Element)(meta << (i * 4))));
+    }
+
+    // forcing meta index 01
+    result = (Element)input;
+
+    return result;
+  }
+};
+
+/// Computes a random sparse meta
+template <
+  typename Element,               ///< Element type
+  typename Layout>                ///< Layout function
+struct TensorFillInputSparseMetaFunc {
+
+  using TensorView = TensorView<Element, Layout>;
+
+  //
+  // Data members
+  //
+
+  TensorView view;
+  InputSparseMetaFunc<Element> func;
+
+  //
+  // Methods
+  //
+
+  /// Construction of Gaussian RNG functor.
+  TensorFillInputSparseMetaFunc(
+    TensorView view_ = TensorView(),
+    InputSparseMetaFunc<Element> func_ = InputSparseMetaFunc<Element>()
+  ):
+    view(view_), func(func_) {
+
+  }
+
+  /// Compute random value and update RNG state
+  void operator()(Coord<Layout::kRank> const &coord) const {
+
+    view.at(coord) = func();
+  }
+};
+
 } // namespace detail
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1447,6 +1531,31 @@ void TensorFillRandomSparseMeta(
   detail::RandomSparseMetaFunc<Element> random_func(seed, MetaSizeInBits);
 
   detail::TensorFillRandomSparseMetaFunc<Element, Layout> func(
+    dst,
+    random_func
+  );
+
+  TensorForEach(
+    dst.extent(),
+    func
+  );
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+
+/// Fills a tensor with input value.
+template <
+  typename Element,                 ///< Element type
+  typename Layout>                  ///< Layout function
+void TensorFillInputSparseMeta(
+  TensorView<Element, Layout> dst,  ///< destination tensor
+  uint64_t seed,                    ///< seed for RNG
+  int input,
+  int MetaSizeInBits) {             ///< 2 bit or 4 bit
+
+  detail::InputSparseMetaFunc<Element> random_func(seed, input, MetaSizeInBits);
+
+  detail::TensorFillInputSparseMetaFunc<Element, Layout> func(
     dst,
     random_func
   );
