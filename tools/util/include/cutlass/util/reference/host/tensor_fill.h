@@ -1511,7 +1511,7 @@ struct TensorFillInputSparseMetaFunc {
   void operator()(Coord<Layout::kRank> const &coord) const {
 
     if(coord[0]<extra_row_num){
-      std::cout<<coord<<std::endl;
+      //std::cout<<coord<<std::endl;
       view.at(coord) = func();
     }
 
