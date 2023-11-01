@@ -40,7 +40,7 @@
 #include "cutlass/util/tensor_view_io.h"
 #include "cutlass/util/reference/host/gemm.h"
 
-#define DBG_LOG_EN      0 // 0: disable, 1: enable
+#define META_DBG_LOG_EN      0 // 0: disable, 1: enable
 
 namespace cutlass {
 
@@ -84,7 +84,7 @@ void uncompress(TensorRef<ElementA, LayoutA> uncompressed_tensor_a,
     for (int c = 0; c < (col / DecompressedElementsPerElementE); ++c) {
 
       ElementE meta = tensor_e.at(MatrixCoord(r, c));
-#if DBG_LOG_EN==1
+#if META_DBG_LOG_EN==1
       std::cout<<meta<<std::endl;
 #endif
 
@@ -92,7 +92,7 @@ void uncompress(TensorRef<ElementA, LayoutA> uncompressed_tensor_a,
         int e = (meta >> (i / step * 4)) & 0xf;
         int idx0 = e & 0x3;
         int idx1 = e >> 2;
-#if DBG_LOG_EN==1
+#if META_DBG_LOG_EN==1
         std::cout<<idx0<<std::endl;
         std::cout<<idx1<<std::endl;
 #endif
@@ -105,7 +105,7 @@ void uncompress(TensorRef<ElementA, LayoutA> uncompressed_tensor_a,
           int compressed_col = (real_col / b) * a;
 
           if (ii == (idx0 * ElementsPerE)) {
-#if DBG_LOG_EN==1
+#if META_DBG_LOG_EN==1
             std::cout<<"ii: "<<ii<<", idx0: "<< idx0<<", real_col: "<<real_col<<std::endl;
 #endif
             uncompressed_tensor_a.at(MatrixCoord(r, real_col)) =
@@ -114,7 +114,7 @@ void uncompress(TensorRef<ElementA, LayoutA> uncompressed_tensor_a,
               uncompressed_tensor_a.at(MatrixCoord(r, real_col + 1)) =
                   tensor_a.at(MatrixCoord(r, compressed_col + 1));
           } else if ((ii == (idx1 * ElementsPerE)) && (a != 1)) {
-#if DBG_LOG_EN==1
+#if META_DBG_LOG_EN==1
             std::cout<<"ii: "<<ii<<", idx1: "<< idx1<<", real_col: "<<real_col<<std::endl;
 #endif
             uncompressed_tensor_a.at(MatrixCoord(r, real_col)) =
@@ -124,7 +124,7 @@ void uncompress(TensorRef<ElementA, LayoutA> uncompressed_tensor_a,
                   tensor_a.at(
                       MatrixCoord(r, compressed_col + ElementsPerE + 1));
           } else {
-#if DBG_LOG_EN==1
+#if META_DBG_LOG_EN==1
             std::cout<<"ii: "<<ii<<", idx0: "<< idx0<<", idx1: "<< idx1<<", real_col: "<<real_col<<std::endl;
 #endif
             uncompressed_tensor_a.at(MatrixCoord(r, real_col)) =

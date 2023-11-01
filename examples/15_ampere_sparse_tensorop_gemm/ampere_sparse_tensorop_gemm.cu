@@ -65,6 +65,7 @@ efficiently.
 #define DBG_LOG_EN      0 // 0: disable, 1: enable
 
 #define LIST_ENTRY_NUM  2048 
+
 #define M_SIZE          2048
 #define K_SIZE          20480
 #define N_SIZE          5120
@@ -215,24 +216,23 @@ cudaError_t AllocateMatrix(T **matrix, int rows, int columns, int seed = 0) {
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
 //__global__ void vecAdd(cutlass::half_t *a, cutlass::half_t *b, cutlass::half_t *c, int n)
-__global__ void vecAdd(float *a, float *b, float *c, int n)
+template <typename T>
+__global__ void vecAdd(T *a, T *b, T *c, int n)
 {
   int id = blockIdx.x*blockDim.x+threadIdx.x;
   if(id<n)
     c[id] = a[id] + b[id];
 }
 
-__global__ void vecAddOpt(float *a, float *b, float *c, int m, int extra_rows, int col_num, int blocksPerRow, int* d_invalid_list)
+template <typename T>
+__global__ void vecAddOpt(T *a, T *b, T *c, int m, int extra_rows, int col_num, int blocksPerRow, int* d_invalid_list)
 {
   int extra_row_id = blockIdx.x/blocksPerRow;
-  //int col_id = extra_row_id*blockDim.x+threadIdx.x;
   int col_id = (blockIdx.x%blocksPerRow)*blockDim.x + threadIdx.x;
-  //int id = blockIdx.x*blockDim.x+threadIdx.x;
   if(extra_row_id<extra_rows && col_id<col_num){
     c[d_invalid_list[extra_row_id]*col_num+col_id] = a[d_invalid_list[extra_row_id]*col_num+col_id] + b[(m+extra_row_id)*col_num+col_id];
     //if(col_id==0)
     //  printf("extra_row_id: %d, original_row: %d\n", extra_row_id, d_invalid_list[extra_row_id]);
-    //c[id] = a[id] + b[id];
   }
 }
 ///////////////////////////////////////////////////////////////////////////////////////////////////
@@ -381,9 +381,6 @@ int run() {
   ///// VECTOR ADDITION
   ///////////////////////////////////////////////
 
-#if VEC_ADD_EN==1
-  std::cout<<"Start vector addition"<<std::endl;
-
   // Allocate host memory for invalid_list
   size_t sizeof_invalid_list = sizeof(int) * LIST_ENTRY_NUM;
   int *h_invalid_list = (int*)malloc(sizeof_invalid_list);
@@ -392,6 +389,9 @@ int run() {
   for(int i=0; i<length_m_extra; i++){
     h_invalid_list[i] = 2*i;
   }
+
+#if VEC_ADD_EN==1
+  std::cout<<"Start vector addition"<<std::endl;
 
   //for(int i=0; i<length_m_extra; i++){
   //  std::cout<<h_invalid_list[i]<<std::endl;
@@ -439,8 +439,9 @@ int run() {
   std::cout<<"tensor_d after vec add"<<std::endl;
   std::cout<<tensor_d.host_view()<<std::endl;
 #endif
-  free(h_invalid_list);
-  cudaFree(d_invalid_list);
+  tensor_d.sync_host();
+  //free(h_invalid_list);
+  //cudaFree(d_invalid_list);
 #endif
   
   ///////////////////////////////////////////////
@@ -542,6 +543,8 @@ int run() {
   std::cout << (passed ? "Passed" : "Failed") << std::endl;
   std::cout<<"End reference on host"<<std::endl;
 
+  free(h_invalid_list);
+  cudaFree(d_invalid_list);
   return (passed ? 0  : -1);
 #elif REF_EN==2
   std::cout<<"Start reference on cutlass"<<std::endl;
@@ -554,6 +557,13 @@ int run() {
 
   // Copy data from host to GPU
   tensor_a_uncompressed.sync_device();
+
+  numElements = length_m_extra * length_k;
+  threadsPerBlock = 1024;
+  blocksPerGrid = (numElements + threadsPerBlock - 1) / threadsPerBlock;
+  blocksPerRow = (length_k + threadsPerBlock - 1) / threadsPerBlock;
+
+  vecAddOpt<<<blocksPerGrid,threadsPerBlock>>>(tensor_a_uncompressed.device_data_ptr_offset(0), tensor_a_uncompressed.device_data_ptr_offset(0), tensor_a_uncompressed.device_data_ptr_offset(0), length_m-length_m_extra, length_m_extra, length_k, blocksPerRow, d_invalid_list);
 
   // Create a tuple of gemm kernel arguments. This is later passed as arguments to launch
   // instantiated CUTLASS kernel
@@ -583,9 +593,12 @@ int run() {
   std::cout << (passed ? "Passed" : "Failed") << std::endl;
   std::cout<<"End reference on cutlass"<<std::endl;
 
+  free(h_invalid_list);
+  cudaFree(d_invalid_list);
   return 0;
 #else
-  tensor_d.host_view(),
+  free(h_invalid_list);
+  cudaFree(d_invalid_list);
   std::cout<<"No reference"<<std::endl;
   return 0;
 #endif
