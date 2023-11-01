@@ -63,7 +63,12 @@ efficiently.
 #define VEC_ADD_EN      1 // 0: disable, 1: enable
 #define REF_EN          2 // 0: disable, 1: host, 2: cutlass
 #define DBG_LOG_EN      0 // 0: disable, 1: enable
-#define LIST_ENTRY_NUM  1024
+
+#define LIST_ENTRY_NUM  2048 
+#define M_SIZE          2048
+#define K_SIZE          20480
+#define N_SIZE          5120
+#define M_EXTRA_SIZE    224
 
 
 #if (DENSE_GEMM_EN==1 || REF_EN==2)
@@ -235,10 +240,10 @@ __global__ void vecAddOpt(float *a, float *b, float *c, int m, int extra_rows, i
 
 int run() {
 
-  const int length_m_extra = 128;
-  const int length_m = 2048 + length_m_extra;
-  const int length_k = 2048;
-  const int length_n = 5120;
+  const int length_m_extra = M_EXTRA_SIZE;
+  const int length_m = M_SIZE + length_m_extra;
+  const int length_k = K_SIZE;
+  const int length_n = N_SIZE;
 
   std::cout<< "M: "<<length_m<<" (+"<<length_m_extra<<"), K: "<<length_k<<", N: "<<length_n<<std::endl;
   // Create a tuple of problem size for matrix multiplication
