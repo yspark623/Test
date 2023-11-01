@@ -298,6 +298,15 @@ int run() {
       tensor_e.host_view(),
       1,
       kMetaSizeInBits);   // <- Fill matrix E on host with uniform-distribution random meta data
+
+      // Fill matrix E of extra rows with 0xEEEE
+  cutlass::reference::host::TensorFillInputSparseMeta(
+      tensor_e.host_view((length_m-length_m_extra)*length_k/2/8), //  = /2(2:4)/8(8 idx per 16bit)
+      1,
+      0xEEEE,
+      length_m_extra,
+      kMetaSizeInBits);   // <- Fill matrix E on host with uniform-distribution random meta data
+
   cutlass::reference::host::TensorFill(
       tensor_d.host_view());  // <- fill matrix D on host with zeros
   cutlass::reference::host::TensorFill(
