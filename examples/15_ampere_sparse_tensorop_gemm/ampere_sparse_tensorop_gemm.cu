@@ -294,7 +294,7 @@ int run() {
       ElementOutput(2),
       ElementOutput(-2),
       0);  // <- Fill matrix C on host with uniform-distribution random data
-  cutlass::reference::host::TensorFillRandomSparseMeta(                                           
+  cutlass::reference::host::TensorFillRandomSparseMeta(
       tensor_e.host_view(),
       1,
       kMetaSizeInBits);   // <- Fill matrix E on host with uniform-distribution random meta data

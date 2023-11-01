@@ -1389,9 +1389,6 @@ struct RandomSparseMetaFunc {
       result = (Element)(result | ((Element)(meta << (i * 4))));
     }
 
-    // forcing meta index 01
-    result = 17476;
-
     return result;
   }
 };
