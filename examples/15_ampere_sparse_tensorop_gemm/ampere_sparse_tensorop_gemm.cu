@@ -59,17 +59,17 @@ efficiently.
 ///////////////////////////////////////////////
 ///// TEST CONFIGURATION
 ///////////////////////////////////////////////
-#define DENSE_GEMM_EN   0 // 0: disable, 1: enable
+#define DENSE_GEMM_EN   1 // 0: disable, 1: enable
 #define VEC_ADD_EN      1 // 0: disable, 1: enable
 #define REF_EN          2 // 0: disable, 1: host, 2: cutlass
 #define DBG_LOG_EN      0 // 0: disable, 1: enable
 
 #define LIST_ENTRY_NUM  2048 
 
-#define M_SIZE          2048
+#define M_SIZE          512
 #define K_SIZE          20480
 #define N_SIZE          5120
-#define M_EXTRA_SIZE    224
+#define M_EXTRA_SIZE    0
 
 
 #if (DENSE_GEMM_EN==1 || REF_EN==2)
@@ -238,12 +238,16 @@ __global__ void vecAddOpt(T *a, T *b, T *c, int m, int extra_rows, int col_num, 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
 
-int run() {
+int run(int m_size_, int m_extra_) {
 
-  const int length_m_extra = M_EXTRA_SIZE;
-  const int length_m = M_SIZE + length_m_extra;
+  //const int length_m_extra = M_EXTRA_SIZE;
+  //const int length_m = M_SIZE + length_m_extra;
+  const int length_m_extra = m_extra_;
+  const int length_m = m_size_ + length_m_extra;
   const int length_k = K_SIZE;
   const int length_n = N_SIZE;
+
+  cudaError_t result;
 
   std::cout<< "M: "<<length_m<<" (+"<<length_m_extra<<"), K: "<<length_k<<", N: "<<length_n<<std::endl;
   // Create a tuple of problem size for matrix multiplication
@@ -398,7 +402,6 @@ int run() {
   //}
 
   // Allocate device memory
-  cudaError_t result;
   int *d_invalid_list;
   result = cudaMalloc((void**)&d_invalid_list, sizeof_invalid_list);
   if (result != cudaSuccess) {
@@ -460,8 +463,6 @@ int run() {
   ElementInputA *A;
   ElementInputB *B;
   ElementOutput *C;
-
-  cudaError_t result;
 
   result = AllocateMatrix(&A, length_m, length_k, 0);
 
@@ -604,7 +605,11 @@ int run() {
 #endif
 }
 
-int main() {
+int main(int argc, char* argv[]) {
+  if(argc<3){
+    std::cout<<"./15_ampere_sparse_tensorop_gemm m_size extra_m_size"<<std::endl;
+    exit(1);
+  }
   
   bool notSupported = false;
 
@@ -637,5 +642,5 @@ int main() {
     return 0;
   }
 
-  return run();
+  return run(atoi(argv[1]), atoi(argv[2]));
 }
